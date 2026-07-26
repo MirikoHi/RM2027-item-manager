@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback} from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Search, Plus, Upload, Download, RefreshCcw, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -9,6 +9,8 @@ export default function InventoryDashboard() {
   const [searchKey, setSearchKey] = useState('名称');
   const [searchWord, setSearchWord] = useState('');
   const [loading, setLoading] = useState(true);
+
+  const [isFetchingRemote, setIsFetchingRemote] = useState(false);
 
   // 控制单条入库弹窗的状态
   const [showModal, setShowModal] = useState(false);
@@ -21,19 +23,19 @@ export default function InventoryDashboard() {
     二级分类: ''
   });
 
-  // 获取数据
+  // 使用 useCallback 包装，避免 useEffect 依赖警告
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/inventory');
       const json = await res.json();
       if (json.success) setData(json.data);
-    } catch (err) {
-      console.error("加载失败", err);
+    } catch (error) {
+      console.error("加载数据失败:", error);
     } finally {
       setLoading(false);
     }
-  }, []); // 依赖项为空，表示只在初始化时创建一次
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -116,8 +118,8 @@ export default function InventoryDashboard() {
 
   // 提交单条入库表单
   const handleManualSubmit = () => {
-    if (!manualForm.名称.trim()) {
-      alert('元件名称不能为空');
+    if (!(manualForm.名称.trim() || manualForm.编号.trim())) {
+      alert('元件名称或编号不能为空');
       return;
     }
     if (manualForm.数量 <= 0) {
@@ -127,33 +129,69 @@ export default function InventoryDashboard() {
 
     submitAction('inbound', [{ ...manualForm }]);
     
-    // 提交后关闭弹窗并清空表单
     setShowModal(false);
     setManualForm({名称: '', 封装: '', 数量: 1, 编号: '', 一级分类: '', 二级分类: ''});
   };
 
+  // 联网获取立创数据
+  const handleFetchRemoteData = async () => {
+    if (!manualForm.编号) {
+      alert('请先输入物料编号 (如 C10000)');
+      return;
+    }
+    
+    setIsFetchingRemote(true);
+    try {
+      const res = await fetch(`/api/lcsc?code=${encodeURIComponent(manualForm.编号)}`);
+      const json = await res.json();
+      
+      if (json.success && json.data) {
+        setManualForm(prev => ({
+          ...prev,
+          名称: json.data.名称 || prev.名称,
+          封装: json.data.封装 || prev.封装,
+          一级分类: json.data.一级分类 || prev.一级分类,
+          二级分类: json.data.二级分类 || prev.二级分类
+        }));
+      } else {
+        alert(json.message || '获取失败，请手动填写');
+      }
+    } catch (error) {
+      alert('网络请求失败');
+    } finally {
+      setIsFetchingRemote(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen p-8 max-w-7xl mx-auto space-y-6 relative">
-      <header className="flex justify-between items-end pb-4 border-b border-[#30363d]">
+    // 响应式：p-4 适配手机，md:p-8 适配桌面
+    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6 relative">
+      
+      {/* 头部区域 响应式：手机端纵向排列，桌面端横向排列 */}
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 pb-4 border-b border-[#30363d]">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white mb-2">苍穹硬件组物料库</h1>
-          <p className="text-[#8b949e]">基于 Next.js 打造的本地 Excel 资产管理</p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white mb-2">苍穹硬件组物料库</h1>
+          <p className="text-sm md:text-base text-[#8b949e]">基于 Next.js 的本地资产管理</p>
         </div>
-        <div className="flex gap-3">
-          <button onClick={fetchData} className="btn btn-default"><RefreshCcw size={16} /> 刷新</button>
+        <div className="flex w-full md:w-auto">
+          <button onClick={fetchData} className="btn btn-default md:w-auto">
+            <RefreshCcw size={16} /> 刷新
+          </button>
         </div>
       </header>
 
-      <div className="panel p-4 flex flex-col md:flex-row gap-4 justify-between items-center">
-        <div className="flex gap-2 w-full md:w-auto">
+      {/* 操作控制面板 响应式：复杂折叠 */}
+      <div className="panel p-4 flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center">
+        {/* 查询功能区 */}
+        <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
           <select 
-            className="input-dark w-32"
+            className="input-dark w-full sm:w-32"
             value={searchKey}
             onChange={(e) => setSearchKey(e.target.value)}
           >
             {['名称', '编号', '封装', '一级分类', '二级分类'].map(k => <option key={k} value={k}>{k}</option>)}
           </select>
-          <div className="relative flex-1 md:w-64">
+          <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={16} />
             <input 
               type="text" 
@@ -165,32 +203,35 @@ export default function InventoryDashboard() {
           </div>
         </div>
 
-        <div className="flex gap-3">
+        {/* 按钮操作区 响应式：手机端换行铺满 */}
+        <div className="flex flex-row sm:flex-row gap-3 w-full lg:w-auto justify-center">
           <input type="file" accept=".xlsx,.xls" id="inboundFile" className="hidden" onChange={handleInboundExcel} />
           <input type="file" accept=".xlsx,.xls,.csv" id="outboundFile" className="hidden" onChange={handleOutboundExcel} />
 
-          {/* 触发弹窗的按钮 */}
-          <button onClick={() => setShowModal(true)} className="btn btn-primary"><Plus size={16}/>单条入库</button>
+          <button onClick={() => setShowModal(true)} className="btn btn-primary w-full sm:w-auto flex">
+            <Plus size={16}/>单条入库
+          </button>
           
-          <label htmlFor="inboundFile" className="btn btn-default cursor-pointer">
-            <Download size={16} className="text-[#58a6ff]"/> 购物车入库 (Excel)
+          <label htmlFor="inboundFile" className="btn btn-default cursor-pointer w-full sm:w-auto flex text-center">
+            <Download size={16} className="text-[#58a6ff] mx-auto sm:mx-0"/> <span className="sm:inline hidden">购物车入库</span><span className="sm:hidden">购物车入库</span>
           </label>
           
-          <label htmlFor="outboundFile" className="btn btn-default cursor-pointer">
-            <Upload size={16} className="text-[#ff7b72]"/> BOM出库 (Excel)
+          <label htmlFor="outboundFile" className="btn btn-default cursor-pointer w-full sm:w-auto flex text-center">
+            <Upload size={16} className="text-[#ff7b72] mx-auto sm:mx-0"/> <span className="sm:inline hidden">BOM出库</span><span className="sm:hidden">BOM出库</span>
           </label>
         </div>
       </div>
 
+      {/* 数据表格 响应式：横向滑动不受影响 */}
       <div className="panel overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr>
                 {['名称', '封装', '数量', '编号', '分类', '修改时间', '修改人'].map(th => (
                   <th key={th} className="table-header">{th}</th>
                 ))}
-                <th className="table-header w-24">操作</th>
+                <th className="table-header w-24 sticky right-0 bg-[#161b22] shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">操作</th>
               </tr>
             </thead>
             <tbody className="bg-[#0d1117] divide-y divide-[#30363d]">
@@ -212,9 +253,9 @@ export default function InventoryDashboard() {
                     <td className="table-cell text-xs text-[#8b949e]">
                       {item.一级分类} {item.二级分类 ? `> ${item.二级分类}` : ''}
                     </td>
-                    <td className="table-cell text-xs text-[#8b949e]">{item.修改时间 || '-'}</td>
+                    <td className="table-cell text-xs text-[#8b949e] whitespace-nowrap">{item.修改时间 || '-'}</td>
                     <td className="table-cell text-[#8b949e]">{item.修改人 || '-'}</td>
-                    <td className="table-cell">
+                    <td className="table-cell sticky right-0 bg-inherit md:bg-transparent shadow-[-4px_0_10px_rgba(0,0,0,0.1)] md:shadow-none">
                       <button 
                         onClick={() => {
                           const qty = prompt(`出库 ${item.名称} 的数量:`);
@@ -235,7 +276,8 @@ export default function InventoryDashboard() {
 
       {/* 单条入库弹窗 (Modal) */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        // 响应式：p-4 保证在小屏幕上有外边距不会贴死屏幕边缘
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="panel w-full max-w-md p-6 animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">单条物料入库</h2>
@@ -244,9 +286,39 @@ export default function InventoryDashboard() {
               </button>
             </div>
             
+            {/* 调整后的表单输入流 */}
             <div className="space-y-4">
+              
+              {/* 【需求修改】：编号移到了最上面，并整合了立创联网获取功能 */}
               <div>
-                <label className="block text-sm font-medium text-[#8b949e] mb-1">名称 (必填)</label>
+                <label className="block text-sm font-medium text-[#8b949e] mb-1">
+                  编号 (支持立创编号)
+                </label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    className="input-dark w-full" 
+                    placeholder="如: C1591" 
+                    value={manualForm.编号}
+                    onChange={(e) => setManualForm({...manualForm, 编号: e.target.value})}
+                  />
+                  <button 
+                    type="button"
+                    onClick={handleFetchRemoteData}
+                    disabled={isFetchingRemote || !manualForm.编号}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md border transition-colors whitespace-nowrap
+                      ${isFetchingRemote || !manualForm.编号 
+                        ? 'bg-[#21262d] border-[#30363d] text-[#8b949e] cursor-not-allowed' 
+                        : 'bg-[#1f6feb] border-[#388bfd] text-white hover:bg-[#388bfd]'
+                      }`}
+                  >
+                    {isFetchingRemote ? '获取中...' : '联网获取'}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#8b949e] mb-1">名称</label>
                 <input 
                   type="text" 
                   className="input-dark w-full" 
@@ -255,6 +327,7 @@ export default function InventoryDashboard() {
                   onChange={(e) => setManualForm({...manualForm, 名称: e.target.value})}
                 />
               </div>
+              
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[#8b949e] mb-1">封装</label>
@@ -277,16 +350,7 @@ export default function InventoryDashboard() {
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-[#8b949e] mb-1">编号</label>
-                <input 
-                  type="text" 
-                  className="input-dark w-full" 
-                  placeholder="供应商/原厂料号" 
-                  value={manualForm.编号}
-                  onChange={(e) => setManualForm({...manualForm, 编号: e.target.value})}
-                />
-              </div>
+              
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[#8b949e] mb-1">一级分类</label>
