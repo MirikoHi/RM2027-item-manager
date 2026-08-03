@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Plus, Upload, Download, RefreshCcw, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -22,6 +22,23 @@ export default function InventoryDashboard() {
     一级分类: '',
     二级分类: ''
   });
+
+  // 导入预览弹窗（null = 关闭），点击购物车入库/BOM出库后展示
+  const [preview, setPreview] = useState(null);
+
+  // 预览编辑时的重算防抖、请求序号与最新值引用
+  const previewRef = useRef(null);
+  const previewSeq = useRef(0);
+  const recomputeTimer = useRef(null);
+
+  useEffect(() => {
+    previewRef.current = preview;
+  }, [preview]);
+
+  // 卸载时清理重算定时器
+  useEffect(() => () => {
+    if (recomputeTimer.current) clearTimeout(recomputeTimer.current);
+  }, []);
 
   // 使用 useCallback 包装，避免 useEffect 依赖警告
   const fetchData = useCallback(async () => {
@@ -71,6 +88,97 @@ export default function InventoryDashboard() {
     if (qty && !isNaN(qty) && Number(qty) > 0) submitAction('outbound', [{ ...item, 数量: Number(qty) }]);
   };
 
+  // 请求后端生成导入预览（匹配与数量变更计算在服务端 action 路由完成）
+  const fetchPreview = async (action, items, preserveChecked = false) => {
+    const seq = ++previewSeq.current;
+    try {
+      const res = await fetch('/api/inventory/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, items, preview: true }),
+      });
+      const result = await res.json();
+      if (seq !== previewSeq.current) return; // 已有更新的请求，丢弃旧结果
+      if (result.success && result.data) {
+        setPreview((p) => {
+          const oldItems = preserveChecked ? p?.items || [] : [];
+          // 重算后保留用户已勾选状态（仅当该条目仍可操作时）
+          const newItems = result.data.map((ni, i) => ({
+            ...ni,
+            checked: oldItems[i] ? oldItems[i].checked && !ni.disabled : ni.checked,
+          }));
+          return {
+            action,
+            title: action === 'inbound' ? '购物车入库预览' : 'BOM出库预览',
+            items: newItems,
+          };
+        });
+      } else {
+        alert(result.message || '预览生成失败，请重试');
+      }
+    } catch (error) {
+      if (seq === previewSeq.current) alert('网络请求失败');
+    }
+  };
+
+  // 编辑预览条目字段：更新本地值，并延迟重算数量变更
+  const updatePreviewField = (idx, field, value) => {
+    setPreview((p) => {
+      if (!p) return p;
+      const items = p.items.map((it, i) => (i === idx ? { ...it, [field]: value } : it));
+      return { ...p, items };
+    });
+    if (recomputeTimer.current) clearTimeout(recomputeTimer.current);
+    recomputeTimer.current = setTimeout(() => {
+      const p = previewRef.current;
+      if (p) fetchPreview(p.action, p.items, true);
+    }, 350);
+  };
+
+  // 变更文案
+  const deltaText = (it) => {
+    if (it.status === 'insufficient') return `需求${Number(it.数量) || 0} · 现有${it.currentQty}`;
+    if (it.status === 'notfound') return '';
+    return `${it.currentQty} > ${it.afterQty}`;
+  };
+
+  // 预览字段是否可编辑：入库全部可编辑，出库仅数量可编辑
+  const isPreviewFieldEditable = (field) => preview?.action === 'inbound' || field === '数量';
+  const previewFieldClass = (field) =>
+    `input-dark w-full min-h-8 px-2 py-1 text-xs${isPreviewFieldEditable(field) ? '' : ' cursor-not-allowed opacity-80'}`;
+
+  // 切换某条勾选（禁用条目不可勾选）
+  const togglePreviewItem = (idx) => {
+    setPreview((p) => {
+      if (!p) return p;
+      const items = p.items.map((it, i) => (i === idx && !it.disabled ? { ...it, checked: !it.checked } : it));
+      return { ...p, items };
+    });
+  };
+
+  // 全选 / 全不选（跳过禁用条目）
+  const togglePreviewAll = () => {
+    setPreview((p) => {
+      if (!p) return p;
+      const allOn = p.items.every((it) => it.disabled || it.checked);
+      const items = p.items.map((it) => (it.disabled ? it : { ...it, checked: !allOn }));
+      return { ...p, items };
+    });
+  };
+
+  // 确认提交：仅提交勾选条目
+  const confirmPreview = () => {
+    if (!preview) return;
+    const checked = preview.items.filter((it) => it.checked);
+    if (checked.length === 0) {
+      alert('请至少勾选一条');
+      return;
+    }
+    const safe = checked.map(({ 名称, 封装, 数量, 编号, 一级分类, 二级分类 }) => ({ 名称, 封装, 数量, 编号, 一级分类, 二级分类 }));
+    setPreview(null);
+    submitAction(preview.action, safe);
+  };
+
   // Excel解析：入库文件映射
   const handleInboundExcel = (e) => {
     const file = e.target.files?.[0];
@@ -91,8 +199,10 @@ export default function InventoryDashboard() {
         二级分类: row['商品分类']?.split('/')[1] || '',
       })).filter(i => i.名称 && i.数量);
 
-      if(mappedItems.length > 0 && confirm(`识别到 ${mappedItems.length} 条入库记录，确认提交？`)) {
-        submitAction('inbound', mappedItems);
+      if (mappedItems.length > 0) {
+        fetchPreview('inbound', mappedItems);
+      } else {
+        alert('未识别到有效的入库记录');
       }
     };
     reader.readAsBinaryString(file);
@@ -114,11 +224,15 @@ export default function InventoryDashboard() {
         名称: row['Device'] || row['Name'] || row['名称'],
         数量: row['Quantity'] || row['数量'],
         编号: row['Supplier Part'] || row['Manufacturer Part'] || row['编号'],
-        封装: row['Footprint'] || row['封装']
+        封装: row['Footprint'] || row['封装'],
+        一级分类: row['一级分类'] || row['分类']?.split('/')[0] || '',
+        二级分类: row['二级分类'] || row['分类']?.split('/')[1] || ''
       })).filter(i => i.名称 && i.数量);
 
-      if(mappedItems.length > 0 && confirm(`识别到 ${mappedItems.length} 条出库BOM需求，确认检查并出库？`)) {
-        submitAction('outbound', mappedItems);
+      if (mappedItems.length > 0) {
+        fetchPreview('outbound', mappedItems);
+      } else {
+        alert('未识别到有效的出库记录');
       }
     };
     reader.readAsBinaryString(file);
@@ -171,6 +285,14 @@ export default function InventoryDashboard() {
       setIsFetchingRemote(false);
     }
   };
+
+  // 预览弹窗统计（派生值）
+  const previewTotal = preview?.items.length || 0;
+  const previewChecked = preview?.items.filter((it) => it.checked).length || 0;
+  const previewOk = preview?.items.filter((it) => it.status === 'ok').length || 0;
+  const previewNew = preview?.items.filter((it) => it.status === 'new').length || 0;
+  const previewShort = preview?.items.filter((it) => it.status === 'insufficient').length || 0;
+  const previewMiss = preview?.items.filter((it) => it.status === 'notfound').length || 0;
 
   return (
     // 响应式：p-4 适配手机，md:p-8 适配桌面
@@ -421,6 +543,139 @@ export default function InventoryDashboard() {
             <div className="flex justify-end gap-3 mt-8">
               <button className="btn btn-default" onClick={() => setShowModal(false)}>取消</button>
               <button className="btn btn-primary" onClick={handleManualSubmit}>确认入库</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 导入预览弹窗（购物车入库 / BOM出库） */}
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="panel w-full max-w-lg p-6 max-h-[90dvh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-white">{preview.title}</h2>
+              <button onClick={() => setPreview(null)} className="text-[#8b949e] hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* 汇总条：全选 + 统计 */}
+            <div className="flex items-center justify-between gap-3 mb-3 text-sm text-[#8b949e]">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[#58a6ff]"
+                  checked={preview.items.every((it) => it.disabled || it.checked)}
+                  onChange={togglePreviewAll}
+                />
+                全选
+              </label>
+              <span className="text-right">
+                {preview.action === 'inbound'
+                  ? `新增 ${previewNew} · 已存在 ${previewOk}`
+                  : `可出库 ${previewOk} · 缺货 ${previewShort} · 未找到 ${previewMiss}`}
+                <span className="ml-2 text-[#c9d1d9]">已勾选 {previewChecked}/{previewTotal}</span>
+              </span>
+            </div>
+
+            {/* 条目列表 */}
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+              {preview.items.map((it, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-start gap-2.5 p-3 rounded-md border bg-[#0d1117] transition-colors ${
+                    it.disabled ? 'border-[#da3633]/40' : 'border-[#30363d]'
+                  }`}
+                >
+                  <label className="flex items-center flex-shrink-0 cursor-pointer self-start mt-0.5 p-1 -m-1">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[#58a6ff]"
+                      checked={it.checked}
+                      disabled={it.disabled}
+                      onChange={() => togglePreviewItem(idx)}
+                    />
+                  </label>
+                  <div className="min-w-0 flex-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-[#8b949e] mb-0.5">名称</label>
+                        <input
+                          className={previewFieldClass('名称')}
+                          value={it.名称}
+                          readOnly={!isPreviewFieldEditable('名称')}
+                          onChange={(e) => updatePreviewField(idx, '名称', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#8b949e] mb-0.5">数量</label>
+                        <input
+                          type="number"
+                          min="1"
+                          className={previewFieldClass('数量')}
+                          value={it.数量}
+                          onChange={(e) => updatePreviewField(idx, '数量', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#8b949e] mb-0.5">编号</label>
+                        <input
+                          className={previewFieldClass('编号')}
+                          value={it.编号}
+                          readOnly={!isPreviewFieldEditable('编号')}
+                          onChange={(e) => updatePreviewField(idx, '编号', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#8b949e] mb-0.5">封装</label>
+                        <input
+                          className={previewFieldClass('封装')}
+                          value={it.封装}
+                          readOnly={!isPreviewFieldEditable('封装')}
+                          onChange={(e) => updatePreviewField(idx, '封装', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#8b949e] mb-0.5">一级分类</label>
+                        <input
+                          className={previewFieldClass('一级分类')}
+                          value={it.一级分类 || ''}
+                          readOnly={!isPreviewFieldEditable('一级分类')}
+                          onChange={(e) => updatePreviewField(idx, '一级分类', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#8b949e] mb-0.5">二级分类</label>
+                        <input
+                          className={previewFieldClass('二级分类')}
+                          value={it.二级分类 || ''}
+                          readOnly={!isPreviewFieldEditable('二级分类')}
+                          onChange={(e) => updatePreviewField(idx, '二级分类', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap gap-1.5">
+                        {it.status === 'new' && <span className="px-1.5 py-0.5 rounded bg-[#1f6feb] text-white">新增</span>}
+                        {it.status === 'insufficient' && <span className="px-1.5 py-0.5 rounded bg-[#da3633] text-white">缺货</span>}
+                        {it.status === 'notfound' && <span className="px-1.5 py-0.5 rounded bg-[#da3633] text-white">未找到</span>}
+                      </div>
+                      <div className="font-mono text-[#58a6ff] whitespace-nowrap">{deltaText(it)}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button className="btn btn-default" onClick={() => setPreview(null)}>取消</button>
+              <button
+                className="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={previewChecked === 0}
+                onClick={confirmPreview}
+              >
+                确认{preview.action === 'inbound' ? '入库' : '出库'}（{previewChecked} 条）
+              </button>
             </div>
           </div>
         </div>

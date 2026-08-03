@@ -2,10 +2,54 @@ import { NextResponse } from 'next/server';
 import { readInventory, writeInventory } from '@/lib/excelUtils';
 import { format } from 'date-fns';
 
+// 与下方实际变更处理一致的匹配规则：编号完全一致，或（名称+封装）同时一致
+function findExistingIndex(inventory, item) {
+  return inventory.findIndex(
+    (i) => (i.编号 && i.编号 === item.编号) || (i.名称 === item.名称 && i.封装 === item.封装)
+  );
+}
+
+// 构建导入预览：逐条匹配当前库存，计算数量变更（只读，不写入库存）
+// 同一型号多行时按顺序模拟，与下方实际变更处理保持一致
+function buildPreview(action, items, inventory) {
+  const sim = new Map(); // 库存下标 -> 模拟后的当前数量
+  return items.map((it) => {
+    const qty = Number(it.数量) || 0;
+    const idx = findExistingIndex(inventory, it);
+    let currentQty = idx >= 0 ? Number(inventory[idx].数量) || 0 : 0;
+    if (idx >= 0 && sim.has(idx)) currentQty = sim.get(idx);
+
+    if (action === 'inbound') {
+      const status = idx >= 0 ? 'ok' : 'new';
+      const afterQty = currentQty + qty;
+      if (idx >= 0) sim.set(idx, afterQty);
+      return { ...it, status, currentQty, afterQty, checked: true, disabled: false };
+    }
+
+    // outbound
+    if (idx < 0) {
+      return { ...it, status: 'notfound', currentQty: 0, afterQty: null, checked: false, disabled: true };
+    }
+    if (currentQty < qty) {
+      return { ...it, status: 'insufficient', currentQty, afterQty: null, checked: false, disabled: true };
+    }
+    const afterQty = currentQty - qty;
+    sim.set(idx, afterQty);
+    return { ...it, status: 'ok', currentQty, afterQty, checked: true, disabled: false };
+  });
+}
+
 export async function POST(request) {
   try {
-    const { action, items, operator = '系统操作' } = await request.json();
+    const { action, items, operator = '系统操作', preview = false } = await request.json();
     const inventory = readInventory();
+
+    // 预览模式：只计算并返回数量变更，不写入库存
+    if (preview) {
+      const previewItems = buildPreview(action, items, inventory);
+      return NextResponse.json({ success: true, data: previewItems });
+    }
+
     const nowTime = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
     const errors = [];
 
