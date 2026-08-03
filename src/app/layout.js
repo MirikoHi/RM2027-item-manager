@@ -16,10 +16,16 @@ export const metadata = {
   description: "我让你好好分类你👂🐉吗",
 };
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#0d1117',
+};
+
 export default function RootLayout({ children }) {
   return (
     <html
-      lang="en"
+      lang="zh-CN"
       // className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>

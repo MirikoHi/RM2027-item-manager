@@ -38,7 +38,10 @@ export default function InventoryDashboard() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    const init = async () => {
+      await fetchData();
+    };
+    init();
   }, [fetchData]);
 
   // 查询/模糊查询过滤
@@ -60,6 +63,12 @@ export default function InventoryDashboard() {
     } else {
       alert(`失败:\n${result.errors ? result.errors.join('\n') : result.message}`);
     }
+  };
+
+  // 单项出库（弹窗询问数量）
+  const handleOutboundOne = (item) => {
+    const qty = prompt(`出库 ${item.名称} 的数量:`);
+    if (qty && !isNaN(qty) && Number(qty) > 0) submitAction('outbound', [{ ...item, 数量: Number(qty) }]);
   };
 
   // Excel解析：入库文件映射
@@ -165,7 +174,7 @@ export default function InventoryDashboard() {
 
   return (
     // 响应式：p-4 适配手机，md:p-8 适配桌面
-    <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6 relative">
+    <div className="min-h-dvh p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6 relative">
       
       {/* 头部区域 响应式：手机端纵向排列，桌面端横向排列 */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 pb-4 border-b border-[#30363d]">
@@ -173,8 +182,8 @@ export default function InventoryDashboard() {
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white mb-2">苍穹硬件组物料库</h1>
           <p className="text-sm md:text-base text-[#8b949e]">基于 Next.js 的本地资产管理</p>
         </div>
-        <div className="flex w-full md:w-auto">
-          <button onClick={fetchData} className="btn btn-default md:w-auto">
+        <div className="flex w-full md:w-auto md:justify-end">
+          <button onClick={fetchData} className="btn btn-default w-full md:w-auto">
             <RefreshCcw size={16} /> 刷新
           </button>
         </div>
@@ -204,34 +213,71 @@ export default function InventoryDashboard() {
         </div>
 
         {/* 按钮操作区 响应式：手机端换行铺满 */}
-        <div className="flex flex-row sm:flex-row gap-3 w-full lg:w-auto justify-center">
+        <div className="grid grid-cols-3 gap-3 w-full lg:flex lg:flex-row lg:w-auto lg:justify-end">
           <input type="file" accept=".xlsx,.xls" id="inboundFile" className="hidden" onChange={handleInboundExcel} />
           <input type="file" accept=".xlsx,.xls,.csv" id="outboundFile" className="hidden" onChange={handleOutboundExcel} />
 
-          <button onClick={() => setShowModal(true)} className="btn btn-primary w-full sm:w-auto flex">
+          <button onClick={() => setShowModal(true)} className="btn btn-primary w-full lg:w-auto lg:whitespace-nowrap flex text-xs sm:text-sm px-2 sm:px-3">
             <Plus size={16}/>单条入库
           </button>
-          
-          <label htmlFor="inboundFile" className="btn btn-default cursor-pointer w-full sm:w-auto flex text-center">
-            <Download size={16} className="text-[#58a6ff] mx-auto sm:mx-0"/> <span className="sm:inline hidden">购物车入库</span><span className="sm:hidden">购物车入库</span>
+
+          <label htmlFor="inboundFile" className="btn btn-default cursor-pointer w-full lg:w-auto lg:whitespace-nowrap flex text-center text-xs sm:text-sm px-2 sm:px-3">
+            <Download size={16} className="text-[#58a6ff]"/>购物车入库
           </label>
-          
-          <label htmlFor="outboundFile" className="btn btn-default cursor-pointer w-full sm:w-auto flex text-center">
-            <Upload size={16} className="text-[#ff7b72] mx-auto sm:mx-0"/> <span className="sm:inline hidden">BOM出库</span><span className="sm:hidden">BOM出库</span>
+
+          <label htmlFor="outboundFile" className="btn btn-default cursor-pointer w-full lg:w-auto lg:whitespace-nowrap flex text-center text-xs sm:text-sm px-2 sm:px-3">
+            <Upload size={16} className="text-[#ff7b72]"/>BOM出库
           </label>
         </div>
       </div>
 
-      {/* 数据表格 响应式：横向滑动不受影响 */}
-      <div className="panel overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* 数据列表：手机端卡片视图，桌面端表格 */}
+      {/* 手机端卡片（md 以下上下滑动，避免横向滚动） */}
+      <div className="space-y-3 md:hidden">
+        {loading ? (
+          <div className="panel p-8 text-center text-[#8b949e]">加载中...</div>
+        ) : filteredData.length === 0 ? (
+          <div className="panel p-8 text-center text-[#8b949e]">未找到匹配的物料</div>
+        ) : (
+          filteredData.map((item, idx) => (
+            <div key={idx} className="panel p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-white text-base truncate">{item.名称}</div>
+                  <div className="mt-1.5 space-y-0.5 text-xs text-[#8b949e]">
+                    <div>编号：{item.编号 || '-'}</div>
+                    <div>封装：{item.封装 || '-'}</div>
+                    <div>分类：{item.一级分类}{item.二级分类 ? ` > ${item.二级分类}` : ''}</div>
+                    {item.修改时间 && <div>修改：{item.修改时间} {item.修改人 || ''}</div>}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                  <span className={`px-2 py-1 rounded text-xs font-mono ${item.数量 < 10 ? 'bg-[#da3633] text-white' : 'bg-[#238636] text-white'}`}>
+                    {item.数量}
+                  </span>
+                  <button
+                    onClick={() => handleOutboundOne(item)}
+                    className="text-[#ff7b72] hover:text-white hover:underline text-xs"
+                  >
+                    单项出库
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* 桌面端表格（md 及以上） */}
+      <div className="panel overflow-hidden hidden md:block">
+        <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr>
                 {['名称', '封装', '数量', '编号', '分类', '修改时间', '修改人'].map(th => (
                   <th key={th} className="table-header">{th}</th>
                 ))}
-                <th className="table-header w-24 sticky right-0 bg-[#161b22] shadow-[-4px_0_10px_rgba(0,0,0,0.1)]">操作</th>
+                <th className="table-header w-24 sticky right-0 z-10 bg-[#161b22] shadow-[-4px_0_10px_rgba(0,0,0,0.15)]">操作</th>
               </tr>
             </thead>
             <tbody className="bg-[#0d1117] divide-y divide-[#30363d]">
@@ -255,12 +301,9 @@ export default function InventoryDashboard() {
                     </td>
                     <td className="table-cell text-xs text-[#8b949e] whitespace-nowrap">{item.修改时间 || '-'}</td>
                     <td className="table-cell text-[#8b949e]">{item.修改人 || '-'}</td>
-                    <td className="table-cell sticky right-0 bg-inherit md:bg-transparent shadow-[-4px_0_10px_rgba(0,0,0,0.1)] md:shadow-none">
-                      <button 
-                        onClick={() => {
-                          const qty = prompt(`出库 ${item.名称} 的数量:`);
-                          if(qty && !isNaN(qty) && Number(qty) > 0) submitAction('outbound', [{...item, 数量: Number(qty)}]);
-                        }} 
+                    <td className="table-cell sticky right-0 z-10 bg-[#0d1117] hover:bg-[#161b22] md:bg-transparent shadow-[-4px_0_10px_rgba(0,0,0,0.2)] md:shadow-none">
+                      <button
+                        onClick={() => handleOutboundOne(item)}
                         className="text-[#ff7b72] hover:text-white hover:underline text-xs"
                       >
                         单项出库
@@ -277,8 +320,8 @@ export default function InventoryDashboard() {
       {/* 单条入库弹窗 (Modal) */}
       {showModal && (
         // 响应式：p-4 保证在小屏幕上有外边距不会贴死屏幕边缘
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="panel w-full max-w-md p-6 animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="panel w-full max-w-md p-6 max-h-[90dvh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">单条物料入库</h2>
               <button onClick={() => setShowModal(false)} className="text-[#8b949e] hover:text-white transition-colors">
