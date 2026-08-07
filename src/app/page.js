@@ -10,6 +10,11 @@ export default function InventoryDashboard() {
   const [searchWord, setSearchWord] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // 操作认证：修改人 + 密钥，两项都填写后才能执行出入库操作
+  const [operator, setOperator] = useState('');
+  const [secret, setSecret] = useState('');
+  const canOperate = Boolean(operator.trim() && secret.trim());
+
   // 列表排序：点击表头切换 升序/降序
   const [sortKey, setSortKey] = useState(null);
   const [sortOrder, setSortOrder] = useState('asc');
@@ -98,7 +103,7 @@ export default function InventoryDashboard() {
     const res = await fetch('/api/inventory/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, items, operator: '当前用户' }),
+      body: JSON.stringify({ action, items, operator, secret }),
     });
     const result = await res.json();
     if (result.success) {
@@ -228,7 +233,7 @@ export default function InventoryDashboard() {
       if (mappedItems.length > 0) {
         fetchPreview('inbound', mappedItems);
       } else {
-        alert('未识别到有效的入库记录');
+        alert('未识别到有效的购物车');
       }
     };
     reader.readAsBinaryString(file);
@@ -257,7 +262,7 @@ export default function InventoryDashboard() {
       if (mappedItems.length > 0) {
         fetchPreview('outbound', mappedItems);
       } else {
-        alert('未识别到有效的出库记录');
+        alert('未识别到有效的BOM表');
       }
     };
     reader.readAsBinaryString(file);
@@ -320,13 +325,13 @@ export default function InventoryDashboard() {
 
   // 桌面表格列定义：label 显示名，key 排序字段，width 列宽（table-fixed 固定百分比）
   const columns = [
-    { label: '名称', key: '名称', width: 'w-[20%]' },
-    { label: '封装', key: '封装', width: 'w-[8%]' },
-    { label: '数量', key: '数量', width: 'w-[8%]' },
-    { label: '编号', key: '编号', width: 'w-[15%]' },
+    { label: '名称', key: '名称', width: 'w-[16%]' },
+    { label: '封装', key: '封装', width: 'w-[12%]' },
+    { label: '数量', key: '数量', width: 'w-[7%]' },
+    { label: '编号', key: '编号', width: 'w-[12%]' },
     { label: '分类', key: '一级分类', width: 'w-[13%]' },
-    { label: '修改时间', key: '修改时间', width: 'w-[16%]' },
-    { label: '修改人', key: '修改人', width: 'w-[8%]' },
+    { label: '修改时间', key: '修改时间', width: 'w-[13%]' },
+    { label: '修改人', key: '修改人', width: 'w-[12%]' },
   ];
 
   return (
@@ -359,14 +364,28 @@ export default function InventoryDashboard() {
           </select>
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={16} />
-            <input 
-              type="text" 
-              className="input-dark w-full pl-9" 
-              placeholder="模糊搜索..." 
+            <input
+              type="text"
+              className="input-dark w-full pl-9"
+              placeholder="模糊搜索..."
               value={searchWord}
               onChange={(e) => setSearchWord(e.target.value)}
             />
           </div>
+          <input
+            type="text"
+            className="input-dark w-full sm:w-32"
+            placeholder="操作人员"
+            value={operator}
+            onChange={(e) => setOperator(e.target.value)}
+          />
+          <input
+            type="text"
+            className="input-dark w-full sm:w-[35%]"
+            placeholder="密钥"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+          />
         </div>
 
         {/* 按钮操作区 响应式：手机端换行铺满 */}
@@ -374,15 +393,32 @@ export default function InventoryDashboard() {
           <input type="file" accept=".xlsx,.xls" id="inboundFile" className="hidden" onChange={handleInboundExcel} />
           <input type="file" accept=".xlsx,.xls,.csv" id="outboundFile" className="hidden" onChange={handleOutboundExcel} />
 
-          <button onClick={() => setShowModal(true)} className="btn btn-primary w-full lg:w-auto lg:whitespace-nowrap flex text-xs sm:text-sm px-2 sm:px-3">
+          <button
+            onClick={() => setShowModal(true)}
+            disabled={!canOperate}
+            title={canOperate ? '' : '请先填写修改人和密钥'}
+            className="btn btn-primary w-full lg:w-auto lg:whitespace-nowrap flex text-xs sm:text-sm px-2 sm:px-3 disabled:opacity-50"
+          >
             <Plus size={16}/>单条入库
           </button>
 
-          <label htmlFor="inboundFile" className="btn btn-default cursor-pointer w-full lg:w-auto lg:whitespace-nowrap flex text-center text-xs sm:text-sm px-2 sm:px-3">
+          <label
+            htmlFor="inboundFile"
+            title={canOperate ? '' : '请先填写修改人和密钥'}
+            className={`btn btn-default w-full lg:w-auto lg:whitespace-nowrap flex text-center text-xs sm:text-sm px-2 sm:px-3 ${
+              canOperate ? 'cursor-pointer' : 'pointer-events-none opacity-50 cursor-not-allowed select-none'
+            }`}
+          >
             <Download size={16} className="text-[#58a6ff]"/>购物车入库
           </label>
 
-          <label htmlFor="outboundFile" className="btn btn-default cursor-pointer w-full lg:w-auto lg:whitespace-nowrap flex text-center text-xs sm:text-sm px-2 sm:px-3">
+          <label
+            htmlFor="outboundFile"
+            title={canOperate ? '' : '请先填写修改人和密钥'}
+            className={`btn btn-default w-full lg:w-auto lg:whitespace-nowrap flex text-center text-xs sm:text-sm px-2 sm:px-3 ${
+              canOperate ? 'cursor-pointer' : 'pointer-events-none opacity-50 cursor-not-allowed select-none'
+            }`}
+          >
             <Upload size={16} className="text-[#ff7b72]"/>BOM出库
           </label>
         </div>

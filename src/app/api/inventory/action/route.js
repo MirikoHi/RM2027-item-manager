@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { NextResponse } from 'next/server';
 import { readInventory, writeInventory } from '@/lib/excelUtils';
 import { format } from 'date-fns';
@@ -41,7 +42,7 @@ function buildPreview(action, items, inventory) {
 
 export async function POST(request) {
   try {
-    const { action, items, operator = '系统操作', preview = false } = await request.json();
+    const { action, items, operator = '系统操作', secret = '', preview = false } = await request.json();
     const inventory = readInventory();
 
     // 预览模式：只计算并返回数量变更，不写入库存
@@ -49,6 +50,15 @@ export async function POST(request) {
       const previewItems = buildPreview(action, items, inventory);
       return NextResponse.json({ success: true, data: previewItems });
     }
+
+    // 写入操作必须携带 修改人 + 密钥，密钥只参与后端哈希，绝不落库
+    if (!operator.trim() || !secret.trim()) {
+      return NextResponse.json({ success: false, message: '请填写修改人和密钥后再操作' }, { status: 400 });
+    }
+
+    // 修改人落库格式：{修改人}({修改人+密钥 合并 sha256 前 8 位})，哈希计算只发生在后端
+    const digest = createHash('sha256').update(`${operator}${secret}`).digest('hex');
+    const modifier = `${operator}(${digest.slice(0, 8)})`;
 
     const nowTime = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
     const errors = [];
@@ -63,7 +73,7 @@ export async function POST(request) {
         if (existingIdx >= 0) {
           inventory[existingIdx].数量 = Number(inventory[existingIdx].数量) + Number(incItem.数量);
           inventory[existingIdx].修改时间 = nowTime;
-          inventory[existingIdx].修改人 = operator;
+          inventory[existingIdx].修改人 = modifier;
         } else {
           inventory.push({
             名称: incItem.名称 || '未知',
@@ -72,7 +82,7 @@ export async function POST(request) {
             编号: incItem.编号 || '',
             一级分类: incItem.一级分类 || '默认',
             修改时间: nowTime,
-            修改人: operator,
+            修改人: modifier,
           });
         }
       } else if (action === 'outbound') {
@@ -81,7 +91,7 @@ export async function POST(request) {
           if (inventory[existingIdx].数量 >= outQty) {
             inventory[existingIdx].数量 -= outQty;
             inventory[existingIdx].修改时间 = nowTime;
-            inventory[existingIdx].修改人 = operator;
+            inventory[existingIdx].修改人 = modifier;
           } else {
             errors.push(`${incItem.名称} 库存不足 (需求:${outQty}, 当前:${inventory[existingIdx].数量})`);
           }
