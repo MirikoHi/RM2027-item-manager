@@ -4,12 +4,11 @@ import * as cheerio from 'cheerio';
 /**
  * 统一的内部模型映射
  */
-function mapToInternalModel(name, footprint, cate1, cate2) {
+function mapToInternalModel(name, footprint, cate1) {
   return {
     名称: name || '',
     封装: footprint || '',
-    一级分类: cate1 || '',
-    二级分类: cate2 || ''
+    一级分类: cate1 || ''
   };
 }
 
@@ -78,9 +77,8 @@ async function fetchViaAPI(code) {
   const name = finalResult.productCodeManufacturer || finalResult.productDesc || '';
   const footprint = finalResult.selfStandard || finalResult.encapsulationModel || '';
   const cate1 = finalResult.catalog1 || finalResult.lcCatalogName || '';
-  const cate2 = finalResult.catalog2 || '';
 
-  return mapToInternalModel(name, footprint, cate1, cate2);
+  return mapToInternalModel(name, footprint, cate1);
 }
 
 
@@ -121,7 +119,7 @@ async function fetchViaHTML(code) {
   const footprint = firstCard.find('dt:contains("封装")').first().siblings('dd').text().trim();
   const category = firstCard.find('dt:contains("类目")').first().siblings('dd').text().trim();
 
-  return mapToInternalModel(name, footprint, cate1, cate2);
+  return mapToInternalModel(name, footprint, category);
 }
 
 /**

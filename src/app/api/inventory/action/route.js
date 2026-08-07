@@ -71,7 +71,6 @@ export async function POST(request) {
             数量: Number(incItem.数量) || 0,
             编号: incItem.编号 || '',
             一级分类: incItem.一级分类 || '默认',
-            二级分类: incItem.二级分类 || '默认',
             修改时间: nowTime,
             修改人: operator,
           });

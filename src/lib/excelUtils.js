@@ -12,7 +12,7 @@ function ensureFileExists() {
   }
   
   if (!fs.existsSync(DATA_PATH)) {
-    const ws = XLSX.utils.json_to_sheet([], { header: ['名称', '封装', '数量', '编号', '一级分类', '二级分类', '修改时间', '修改人'] });
+    const ws = XLSX.utils.json_to_sheet([], { header: ['名称', '封装', '数量', '编号', '一级分类', '修改时间', '修改人'] });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     
@@ -39,7 +39,7 @@ export function readInventory() {
 export function writeInventory(data) {
   try {
     ensureFileExists();
-    const ws = XLSX.utils.json_to_sheet(data, { header: ['名称', '封装', '数量', '编号', '一级分类', '二级分类', '修改时间', '修改人'] });
+    const ws = XLSX.utils.json_to_sheet(data, { header: ['名称', '封装', '数量', '编号', '一级分类', '修改时间', '修改人'] });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     

@@ -10,6 +10,10 @@ export default function InventoryDashboard() {
   const [searchWord, setSearchWord] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // 列表排序：点击表头切换 升序/降序
+  const [sortKey, setSortKey] = useState(null);
+  const [sortOrder, setSortOrder] = useState('asc');
+
   const [isFetchingRemote, setIsFetchingRemote] = useState(false);
 
   // 控制单条入库弹窗的状态
@@ -19,8 +23,7 @@ export default function InventoryDashboard() {
     封装: '',
     数量: 1,
     编号: '',
-    一级分类: '',
-    二级分类: ''
+    一级分类: ''
   });
 
   // 导入预览弹窗（null = 关闭），点击购物车入库/BOM出库后展示
@@ -65,6 +68,30 @@ export default function InventoryDashboard() {
   const filteredData = data.filter((item) =>
     String(item[searchKey] || '').toLowerCase().includes(searchWord.toLowerCase())
   );
+
+  // 排序后的列表：未点击表头时保持原始顺序
+  const sortedData = [...filteredData].sort((a, b) => {
+    if (!sortKey) return 0;
+    const va = a[sortKey];
+    const vb = b[sortKey];
+    let cmp;
+    if (typeof va === 'number' && typeof vb === 'number') {
+      cmp = va - vb;
+    } else {
+      cmp = String(va ?? '').localeCompare(String(vb ?? ''), 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+    }
+    return sortOrder === 'asc' ? cmp : -cmp;
+  });
+
+  // 点击表头：同列切换升降序，新列默认升序
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortOrder('asc');
+    }
+  };
 
   // 统一提交出入库数据到API
   const submitAction = async (action, items) => {
@@ -174,7 +201,7 @@ export default function InventoryDashboard() {
       alert('请至少勾选一条');
       return;
     }
-    const safe = checked.map(({ 名称, 封装, 数量, 编号, 一级分类, 二级分类 }) => ({ 名称, 封装, 数量, 编号, 一级分类, 二级分类 }));
+    const safe = checked.map(({ 名称, 封装, 数量, 编号, 一级分类 }) => ({ 名称, 封装, 数量, 编号, 一级分类 }));
     setPreview(null);
     submitAction(preview.action, safe);
   };
@@ -196,7 +223,6 @@ export default function InventoryDashboard() {
         数量: row['购买数量'] || row['数量'],
         编号: row['商品编号'] || row['物料编码'] || row['编号'],
         一级分类: row['商品分类']?.split('/')[0] || '未分类',
-        二级分类: row['商品分类']?.split('/')[1] || '',
       })).filter(i => i.名称 && i.数量);
 
       if (mappedItems.length > 0) {
@@ -225,8 +251,7 @@ export default function InventoryDashboard() {
         数量: row['Quantity'] || row['数量'],
         编号: row['Supplier Part'] || row['Manufacturer Part'] || row['编号'],
         封装: row['Footprint'] || row['封装'],
-        一级分类: row['一级分类'] || row['分类']?.split('/')[0] || '',
-        二级分类: row['二级分类'] || row['分类']?.split('/')[1] || ''
+        一级分类: row['一级分类'] || row['分类']?.split('/')[0] || ''
       })).filter(i => i.名称 && i.数量);
 
       if (mappedItems.length > 0) {
@@ -253,7 +278,7 @@ export default function InventoryDashboard() {
     submitAction('inbound', [{ ...manualForm }]);
     
     setShowModal(false);
-    setManualForm({名称: '', 封装: '', 数量: 1, 编号: '', 一级分类: '', 二级分类: ''});
+    setManualForm({名称: '', 封装: '', 数量: 1, 编号: '', 一级分类: ''});
   };
 
   // 联网获取立创数据
@@ -273,8 +298,7 @@ export default function InventoryDashboard() {
           ...prev,
           名称: json.data.名称 || prev.名称,
           封装: json.data.封装 || prev.封装,
-          一级分类: json.data.一级分类 || prev.一级分类,
-          二级分类: json.data.二级分类 || prev.二级分类
+          一级分类: json.data.一级分类 || prev.一级分类
         }));
       } else {
         alert(json.message || '获取失败，请手动填写');
@@ -294,15 +318,26 @@ export default function InventoryDashboard() {
   const previewShort = preview?.items.filter((it) => it.status === 'insufficient').length || 0;
   const previewMiss = preview?.items.filter((it) => it.status === 'notfound').length || 0;
 
+  // 桌面表格列定义：label 显示名，key 排序字段，width 列宽（table-fixed 固定百分比）
+  const columns = [
+    { label: '名称', key: '名称', width: 'w-[20%]' },
+    { label: '封装', key: '封装', width: 'w-[8%]' },
+    { label: '数量', key: '数量', width: 'w-[8%]' },
+    { label: '编号', key: '编号', width: 'w-[15%]' },
+    { label: '分类', key: '一级分类', width: 'w-[13%]' },
+    { label: '修改时间', key: '修改时间', width: 'w-[16%]' },
+    { label: '修改人', key: '修改人', width: 'w-[8%]' },
+  ];
+
   return (
     // 响应式：p-4 适配手机，md:p-8 适配桌面
-    <div className="min-h-dvh p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6 relative">
+    <div className="min-h-dvh w-full p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6 relative">
       
       {/* 头部区域 响应式：手机端纵向排列，桌面端横向排列 */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 pb-4 border-b border-[#30363d]">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white mb-2">苍穹硬件组物料库</h1>
-          <p className="text-sm md:text-base text-[#8b949e]">基于 Next.js 的本地资产管理</p>
+          <p className="text-sm md:text-base text-[#8b949e]">基于 Next.js 的 xlsx 资产管理</p>
         </div>
         <div className="flex w-full md:w-auto md:justify-end">
           <button onClick={fetchData} className="btn btn-default w-full md:w-auto">
@@ -320,7 +355,7 @@ export default function InventoryDashboard() {
             value={searchKey}
             onChange={(e) => setSearchKey(e.target.value)}
           >
-            {['名称', '编号', '封装', '一级分类', '二级分类'].map(k => <option key={k} value={k}>{k}</option>)}
+            {['名称', '编号', '封装', '一级分类'].map(k => <option key={k} value={k}>{k}</option>)}
           </select>
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={16} />
@@ -361,15 +396,14 @@ export default function InventoryDashboard() {
         ) : filteredData.length === 0 ? (
           <div className="panel p-8 text-center text-[#8b949e]">未找到匹配的物料</div>
         ) : (
-          filteredData.map((item, idx) => (
-            <div key={idx} className="panel p-4">
-              <div className="flex items-start justify-between gap-3">
+          sortedData.map((item, idx) => (
+            <div key={idx} className="panel p-4">              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-white text-base truncate">{item.名称}</div>
                   <div className="mt-1.5 space-y-0.5 text-xs text-[#8b949e]">
                     <div>编号：{item.编号 || '-'}</div>
                     <div>封装：{item.封装 || '-'}</div>
-                    <div>分类：{item.一级分类}{item.二级分类 ? ` > ${item.二级分类}` : ''}</div>
+                    <div>分类：{item.一级分类 || '-'}</div>
                     {item.修改时间 && <div>修改：{item.修改时间} {item.修改人 || ''}</div>}
                   </div>
                 </div>
@@ -393,13 +427,28 @@ export default function InventoryDashboard() {
       {/* 桌面端表格（md 及以上） */}
       <div className="panel overflow-hidden hidden md:block">
         <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
-          <table className="w-full text-left border-collapse min-w-[700px]">
+          <table className="w-full text-left border-collapse table-fixed">
             <thead>
               <tr>
-                {['名称', '封装', '数量', '编号', '分类', '修改时间', '修改人'].map(th => (
-                  <th key={th} className="table-header">{th}</th>
-                ))}
-                <th className="table-header w-24 sticky right-0 z-10 bg-[#161b22] shadow-[-4px_0_10px_rgba(0,0,0,0.15)]">操作</th>
+                {columns.map((col) => {
+                  const active = sortKey === col.key;
+                  return (
+                    <th
+                      key={col.key}
+                      onClick={() => handleSort(col.key)}
+                      title="点击排序"
+                      className={`table-header ${col.width} cursor-pointer select-none transition-colors ${
+                        active ? 'text-[#58a6ff]' : 'hover:text-[#c9d1d9]'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {col.label}
+                        {active && <span className="text-[10px] leading-none">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                      </span>
+                    </th>
+                  );
+                })}
+                <th className="table-header w-[12%] sticky right-0 z-10 bg-[#161b22] shadow-[-4px_0_10px_rgba(0,0,0,0.15)]">操作</th>
               </tr>
             </thead>
             <tbody className="bg-[#0d1117] divide-y divide-[#30363d]">
@@ -408,21 +457,19 @@ export default function InventoryDashboard() {
               ) : filteredData.length === 0 ? (
                 <tr><td colSpan="8" className="text-center py-8 text-[#8b949e]">未找到匹配的物料</td></tr>
               ) : (
-                filteredData.map((item, idx) => (
+                sortedData.map((item, idx) => (
                   <tr key={idx} className="hover:bg-[#161b22] transition-colors">
-                    <td className="table-cell font-medium text-white">{item.名称}</td>
-                    <td className="table-cell">{item.封装 || '-'}</td>
+                    <td className="table-cell font-medium text-white" title={item.名称}>{item.名称}</td>
+                    <td className="table-cell" title={item.封装}>{item.封装 || '-'}</td>
                     <td className="table-cell font-mono">
                       <span className={`px-2 py-1 rounded text-xs ${item.数量 < 10 ? 'bg-[#da3633] text-white' : 'bg-[#238636] text-white'}`}>
                         {item.数量}
                       </span>
                     </td>
-                    <td className="table-cell text-[#8b949e]">{item.编号 || '-'}</td>
-                    <td className="table-cell text-xs text-[#8b949e]">
-                      {item.一级分类} {item.二级分类 ? `> ${item.二级分类}` : ''}
-                    </td>
-                    <td className="table-cell text-xs text-[#8b949e] whitespace-nowrap">{item.修改时间 || '-'}</td>
-                    <td className="table-cell text-[#8b949e]">{item.修改人 || '-'}</td>
+                    <td className="table-cell text-[#8b949e]" title={item.编号}>{item.编号 || '-'}</td>
+                    <td className="table-cell text-xs text-[#8b949e]" title={item.一级分类}>{item.一级分类 || '-'}</td>
+                    <td className="table-cell text-xs text-[#8b949e]" title={item.修改时间}>{item.修改时间 || '-'}</td>
+                    <td className="table-cell text-[#8b949e]" title={item.修改人}>{item.修改人 || '-'}</td>
                     <td className="table-cell sticky right-0 z-10 bg-[#0d1117] hover:bg-[#161b22] md:bg-transparent shadow-[-4px_0_10px_rgba(0,0,0,0.2)] md:shadow-none">
                       <button
                         onClick={() => handleOutboundOne(item)}
@@ -516,27 +563,15 @@ export default function InventoryDashboard() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[#8b949e] mb-1">一级分类</label>
-                  <input 
-                    type="text" 
-                    className="input-dark w-full" 
-                    placeholder="例如: 电阻" 
-                    value={manualForm.一级分类}
-                    onChange={(e) => setManualForm({...manualForm, 一级分类: e.target.value})}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#8b949e] mb-1">二级分类</label>
-                  <input 
-                    type="text" 
-                    className="input-dark w-full" 
-                    placeholder="例如: 贴片电阻" 
-                    value={manualForm.二级分类}
-                    onChange={(e) => setManualForm({...manualForm, 二级分类: e.target.value})}
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-[#8b949e] mb-1">一级分类</label>
+                <input
+                  type="text"
+                  className="input-dark w-full"
+                  placeholder="例如: 电阻"
+                  value={manualForm.一级分类}
+                  onChange={(e) => setManualForm({...manualForm, 一级分类: e.target.value})}
+                />
               </div>
             </div>
 
@@ -635,22 +670,13 @@ export default function InventoryDashboard() {
                           onChange={(e) => updatePreviewField(idx, '封装', e.target.value)}
                         />
                       </div>
-                      <div>
+                      <div className="col-span-2">
                         <label className="block text-[11px] text-[#8b949e] mb-0.5">一级分类</label>
                         <input
                           className={previewFieldClass('一级分类')}
                           value={it.一级分类 || ''}
                           readOnly={!isPreviewFieldEditable('一级分类')}
                           onChange={(e) => updatePreviewField(idx, '一级分类', e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-[#8b949e] mb-0.5">二级分类</label>
-                        <input
-                          className={previewFieldClass('二级分类')}
-                          value={it.二级分类 || ''}
-                          readOnly={!isPreviewFieldEditable('二级分类')}
-                          onChange={(e) => updatePreviewField(idx, '二级分类', e.target.value)}
                         />
                       </div>
                     </div>
